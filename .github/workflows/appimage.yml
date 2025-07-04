@@ -48,12 +48,16 @@ jobs:
 
     strategy:
       matrix:
+        os: ['ubuntu-latest']
+        arch: ['x86_64']
         parallelization: [0, 1, 2]
         include:
         - os: 'ubuntu-24.04-arm'
           arch: 'aarch64'
-        - os: 'ubuntu-latest'
-          arch: 'x86_64'
+          parallelization: 1
+        - os: 'ubuntu-24.04-arm'
+          arch: 'aarch64'
+          parallelization: 2
 
     steps:
     - uses: actions/checkout@v4
@@ -175,7 +179,7 @@ jobs:
 
     - uses: ncipollo/release-action@v1
       with:
-        artifacts: "ratarmount*.AppImage"
+        artifacts: "ratarmount*.AppImage/*.AppImage"
         tag: ${{ github.ref_name }}
         name: "Ratarmount ${{ github.ref_name }}"
         bodyFile: release.md

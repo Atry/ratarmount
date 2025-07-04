@@ -16,6 +16,13 @@ checkURLProtocolFile()
 }
 
 
+checkURLProtocolChainedTarFile()
+{
+    checkFileInTAR 'tar::file://tests/single-file.tar' bar d3b07384d113edec49eaa6238ad5ff00 ||
+        returnError "$LINENO" 'Failed to read via file:// protocol'
+}
+
+
 checkFileInTARForeground()
 {
     # Similar to checkFileInTAR but calls ratarmount with -f as is necessary for some threaded fsspec backends.
@@ -36,7 +43,9 @@ checkFileInTARForeground()
 
     $RATARMOUNT_CMD -c -f -d 3 "$archive" "$mountFolder" >ratarmount.stdout.log 2>ratarmount.stderr.log &
     waitForMountpoint "$mountFolder" || returnError 'Waiting for mountpoint timed out!'
-    ! 'grep' -C 5 -Ei '(warn|error)' ratarmount.stdout.log ratarmount.stderr.log ||
+    # Beware with matching because the randomly-generated temporary file name did already
+    # lead to a false positive for: /tmp/tmp.lq1FWaRnWe, which contains "WaRn"!
+    ! 'grep' -C 5 -E '(warning|error|Warning|Error|WARNING|ERROR)' ratarmount.stdout.log ratarmount.stderr.log ||
         returnError "$LINENO" "Found warnings while executing: $RATARMOUNT_CMD $*"
 
     echo "Check access to $archive"
@@ -690,6 +699,7 @@ rm -f ratarmount.{stdout,stderr}.log
 # https://filesystem-spec.readthedocs.io/en/latest/api.html#other-known-implementations
 
 checkURLProtocolFile || returnError 'Failed file:// check'
+checkURLProtocolChainedTarFile || returnError 'Failed tar::file:// check'
 checkURLProtocolGit || returnError 'Failed git:// check'
 checkURLProtocolGithub || returnError 'Failed github:// check'
 checkURLProtocolFTP || returnError 'Failed ftp:// check'

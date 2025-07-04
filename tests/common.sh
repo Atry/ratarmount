@@ -45,13 +45,13 @@ if uname | 'grep' -q -i darwin; then
     getFileMode() { stat -f %OLp -- "$1"; }
     getFileMtime() { stat -f %m -- "$1"; }
     setFileMTime() { touch -m -t "$( date -r "$1" +%Y%m%d%H%M.%S )" "$2"; }
-    safeRmdir() { if [[ -z "$( find "$1" -maxdepth 1 )" ]]; then rmdir "$1"; fi; }
+    safeRmdir() { if [[ -d "$1" && -z "$( find "$1" -maxdepth 1 )" ]]; then rmdir "$1"; fi; }
 else
     getFileSize() { stat -c %s -- "$1"; }
     getFileMode() { stat -c %a -- "$1"; }
     getFileMtime() { stat -c %Y -- "$1"; }
     setFileMTime() { touch -d "@$1" "$2"; }
-    safeRmdir() { rmdir --ignore-fail-on-non-empty -- "$1"; }
+    safeRmdir() { if [[ -d "$1" ]]; then rmdir --ignore-fail-on-non-empty -- "$1"; fi; }
 fi
 
 export -f getFileSize
@@ -223,7 +223,7 @@ checkFileInTAR()
         verifyCheckSum "$mountFolder" "$fileInTar" "$archive" "$correctChecksum"
     } || returnError "$LINENO" "$RATARMOUNT_CMD ${args[*]}"
     funmount "$mountFolder"
-    if [[ "$archive" =~ [.]tar ]]; then
+    if [[ "$archive" =~ [.]tar && ! "$archive" =~ tar:: ]]; then
         'grep' -q 'Creating offset dictionary' ratarmount.stdout.log ratarmount.stderr.log ||
             returnError "$LINENO" "Looks like index was not created while executing: $RATARMOUNT_CMD ${args[*]}"
     fi
@@ -241,7 +241,7 @@ checkFileInTAR()
 
     # The libarchive backend does not create indexes for now because it doesn't help the poor performance much and
     # introduces complexity with index compatibility to other backends.
-    if [[ "$archive" =~ [.]tar && ! "$archive" =~ [.]7z$ ]]; then
+    if [[ "$archive" =~ [.]tar && ! "$archive" =~ [.]7z$ && ! "$archive" =~ tar:: ]]; then
         'grep' -q 'Successfully loaded offset dictionary' ratarmount.stdout.log ratarmount.stderr.log ||
             returnError "$LINENO" "Looks like index was not loaded for '$archive' while executing: $RATARMOUNT_CMD ${args[*]}"
     fi
