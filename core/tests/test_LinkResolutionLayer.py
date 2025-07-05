@@ -297,9 +297,6 @@ class TestLinkResolutionLayer(unittest.TestCase):
         # Root directory listing
         listing = layer.list("/")
         print(f"DEBUG: listing = {listing}")
-        print(f"DEBUG: root unionPath resolved_folder_versions = {layer._root_union_path.resolved_folder_branches}")
-        for i, fv in enumerate(layer._root_union_path.resolved_folder_branches):
-            print(f"DEBUG: folder version {i}: path={fv.path}, list_child_names={fv.list_child_names()}")
         print(f"DEBUG: mock source list for '/': {mock_source.list('/')}")
         assert listing is not None
 

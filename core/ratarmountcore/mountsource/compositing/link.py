@@ -64,22 +64,17 @@ class _BranchPath:
         assert isinstance(branch_list, Iterable)
         return branch_list
 
-    @cached_property
-    def file_info(self) -> FileInfo:
-        """The FileInfo for this file version."""
-        return self.unionPath.root.layer.mountSource.lookup(
-            self.path, fileVersion=self.version
-        )
+    fileInfo: Final[FileInfo]
 
     @cached_property
     def link_target(self) -> Optional["_UnionPath"]:
         """
         Resolves the link if this is a symlink or hardlink that should be resolved, otherwise returns None.
         """
-        if self.file_info.linkname:
-            normalizedLinkname = os.path.normpath(self.file_info.linkname)
+        if self.fileInfo.linkname:
+            normalizedLinkname = os.path.normpath(self.fileInfo.linkname)
             if self.unionPath.root.layer.shouldResolveLink(
-                normalizedLinkname, stat.S_IFMT(self.file_info.mode)
+                normalizedLinkname, stat.S_IFMT(self.fileInfo.mode)
             ):
                 if os.path.isabs(normalizedLinkname):
                     return self.unionPath.root._lookup_absolute_path(normalizedLinkname)
@@ -207,7 +202,7 @@ class _UnionPath:
         return tuple(
             branch
             for branch in self.resolved_branches
-            if stat.S_ISDIR(branch.file_info.mode)
+            if stat.S_ISDIR(branch.fileInfo.mode)
         )
 
     # @cached_property
@@ -252,17 +247,24 @@ class _ChildUnionPath(_UnionPath):
             self.name,
         )
 
+    def generate_branches(self):
+        for parentBranch in self.parent.resolved_branches:
+            path = os.path.join(parentBranch.path, self.name)
+            fileInfo = self.root.layer.mountSource.lookup(
+                path, fileVersion=self.version
+            )
+            if fileInfo is not None:
+                yield _BranchPath(
+                    path=path,
+                    parent=parentBranch,
+                    fileInfo=fileInfo,
+                    unionPath=self,
+                )
+
     @cached_property
     def branches(self):
         """The file versions that constitute this union path."""
-        return tuple(
-            _BranchPath(
-                path=os.path.join(parentBranch.path, self.name),
-                parent=parentBranch,
-                unionPath=self,
-            )
-            for parentBranch in self.parent.resolved_folder_branches
-        )
+        return tuple(self.generate_branches())
 
     @cached_property
     def root(self) -> "_RootUnionPath":
@@ -300,6 +302,7 @@ class _RootUnionPath(_UnionPath):
         return (
             _BranchPath(
                 path="/",
+                fileInfo=self.layer.mountSource.lookup("/", fileVersion=self.version),
                 parent=None,
                 unionPath=self,
             ),
@@ -377,7 +380,7 @@ class LinkResolutionLayer(MountSource):
             except ValueError:
                 return None
             else:
-                return resolvedBranch.file_info
+                return resolvedBranch.fileInfo
         else:
             try:
                 (resolvedBranch,) = itertools.islice(
@@ -400,7 +403,7 @@ class LinkResolutionLayer(MountSource):
             except ValueError:
                 return None
             else:
-                return resolvedBranch.file_info
+                return resolvedBranch.fileInfo
 
     def _list(self, path: str) -> Optional[Iterable[str]]:
         unionPath = _RootUnionPath(
