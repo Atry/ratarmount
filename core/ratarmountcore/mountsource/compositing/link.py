@@ -433,44 +433,28 @@ class LinkResolutionLayer(MountSource):
         """
         Opens a file for reading, after link resolution.
         """
-        unionPath = fileInfo.userdata.pop()
-        try:
-            return self.mountSource.open(fileInfo, buffering)
-        finally:
-            fileInfo.userdata.append(unionPath)
+        return self.mountSource.open(fileInfo, buffering)
 
     @overrides(MountSource)
     def read(self, fileInfo: FileInfo, size: int, offset: int) -> bytes:
         """
         Reads data from a file, after link resolution.
         """
-        unionPath = fileInfo.userdata.pop()
-        try:
-            return self.mountSource.read(fileInfo, size, offset)
-        finally:
-            fileInfo.userdata.append(unionPath)
+        return self.mountSource.read(fileInfo, size, offset)
 
     @overrides(MountSource)
     def list_xattr(self, fileInfo: FileInfo) -> List[str]:
         """
         Lists extended attributes of a file, after link resolution.
         """
-        unionPath = fileInfo.userdata.pop()
-        try:
-            return self.mountSource.list_xattr(fileInfo)
-        finally:
-            fileInfo.userdata.append(unionPath)
+        return self.mountSource.list_xattr(fileInfo)
 
     @overrides(MountSource)
     def get_xattr(self, fileInfo: FileInfo, key: str) -> Optional[bytes]:
         """
         Gets an extended attribute of a file, after link resolution.
         """
-        unionPath = fileInfo.userdata.pop()
-        try:
-            return self.mountSource.get_xattr(fileInfo, key)
-        finally:
-            fileInfo.userdata.append(unionPath)
+        return self.mountSource.get_xattr(fileInfo, key)
 
     @overrides(MountSource)
     def is_immutable(self) -> bool:
@@ -504,10 +488,7 @@ class LinkResolutionLayer(MountSource):
         """
         Gets the mount source for a file, after link resolution.
         """
-        sourceFileInfo = fileInfo.clone()
-        unionPath = sourceFileInfo.userdata.pop()
-        assert isinstance(unionPath, _UnionPath)
-        return self.mountSource.get_mount_source(sourceFileInfo)
+        return self.mountSource.get_mount_source(fileInfo)
 
     @overrides(MountSource)
     def statfs(self) -> Dict[str, Any]:
