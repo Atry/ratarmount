@@ -148,3 +148,6 @@ venv.bak/
 
 *.pickle
 *.index.*
+.direnv/
+.envrc.private
+result
