@@ -79,3 +79,25 @@ ignore-words-list = "fo,Nd,unx,cachable"
 
 [tool.setuptools.dynamic]
 version = {attr = "ratarmount.version.__version__"}
+
+[tool.uv.sources]
+ratarmountcore = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "black>=23.3.0",
+    "codespell>=2.2.5",
+    "flake8>=5.0.4",
+    "matplotlib>=3.5.3",
+    "mypy>=1.4.1",
+    "numpy>=1.21.6",
+    "pylint>=2.13.9",
+    "pytest>=7.4.4",
+    "pytype>=2023.6.16",
+    "ratarmountcore[full]",
+    "ruff>=0.12.1",
+    "scipy>=1.7.3",
+]
+
+[tool.uv.workspace]
+members = ["core"]
