@@ -71,6 +71,7 @@ class _BranchPath:
         """
         Resolves the link if this is a symlink or hardlink that should be resolved, otherwise returns None.
         """
+        # FIXME: linkname 应该指向的路径应该在 version 0，而非在当前 self.version
         if self.fileInfo.linkname:
             normalizedLinkname = os.path.normpath(self.fileInfo.linkname)
             if self.unionPath.root.layer.shouldResolveLink(
@@ -354,7 +355,7 @@ class LinkResolutionLayer(MountSource):
                 ._lookup_absolute_path(path)
                 .resolved_branches
             )
-            for underlyingVersion in range(self.mountSource.versions("/"))
+            for underlyingVersion in range(self.mountSource.versions("/"))# FIXME: 此处逻辑不对
         )
 
     @overrides(MountSource)
@@ -367,7 +368,7 @@ class LinkResolutionLayer(MountSource):
                 (resolvedBranch,) = itertools.islice(
                     (
                         resolvedBranch
-                        for underlyingVersion in range(self.mountSource.versions("/"))
+                        for underlyingVersion in range(self.mountSource.versions("/"))# FIXME: 此处逻辑不对
                         for resolvedBranch in _RootUnionPath(
                             layer=self, underlyingVersion=underlyingVersion
                         )
@@ -387,7 +388,7 @@ class LinkResolutionLayer(MountSource):
                     (
                         resolvedBranch
                         for underlyingVersion in range(
-                            -1, -1 - self.mountSource.versions("/")
+                            -1, -1 - self.mountSource.versions("/")# FIXME: 此处逻辑不对
                         )
                         for resolvedBranch in reversed(
                             _RootUnionPath(
