@@ -147,7 +147,7 @@
                   lib.attrsets.genAttrs
                     [
                       "ratarmountcore"
-                      "nativeBuildInputs"
+                      "ratarmount"
                     ]
                     (
                       name:
