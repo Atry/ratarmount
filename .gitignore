@@ -156,3 +156,6 @@ venv.bak/
 *.index.*
 ratarmount.stdout
 ratarmount.stderr
+.direnv/
+.envrc.private
+result
