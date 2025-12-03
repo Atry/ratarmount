@@ -1,23 +1,22 @@
+from __future__ import annotations
+
 import itertools
 import os
 import os.path
 import stat
 import sys
 from abc import abstractmethod
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from functools import reduce
 from typing import (
     IO,
     Any,
     Callable,
-    Dict,
-    Iterable,
     Iterator,
-    List,
     Mapping,
     Optional,
     Sequence,
-    Tuple,
     Union,
 )
 
@@ -55,8 +54,13 @@ class _BranchPath:
     The union path to which this file version belongs.
     """
 
+    mountSource: Final[MountSource]
+    """
+    The mount source this branch belongs to.
+    """
+
     def list_child_names(self) -> Optional[Iterable[str]]:
-        branch_list = self.unionPath.root.layer.mountSource.list_mode(self.path)
+        branch_list = self.mountSource.list_mode(self.path)
         if branch_list is None:
             return None
         if isinstance(branch_list, Mapping):
@@ -147,7 +151,7 @@ class _UnionPath:
 
     @cached_property
     @abstractmethod
-    def version(self) -> str:
+    def version(self) -> int:
         """
         The version number of the file in the underlying mount source.
         """
@@ -170,7 +174,7 @@ class _UnionPath:
         """
         Returns all transitive link targets of this union path, deduplicated.
         """
-        visited: Dict[str, _UnionPath] = {}
+        visited: dict[str, _UnionPath] = {}
 
         def visit(unionPath: _UnionPath):
             if unionPath.path not in visited:
@@ -251,15 +255,15 @@ class _ChildUnionPath(_UnionPath):
     def generate_branches(self):
         for parentBranch in self.parent.resolved_branches:
             path = os.path.join(parentBranch.path, self.name)
-            fileInfo = self.root.layer.mountSource.lookup(
-                path, fileVersion=self.version
-            )
+            # Look up in the same mount source as the parent branch
+            fileInfo = parentBranch.mountSource.lookup(path, fileVersion=self.version)
             if fileInfo is not None:
                 yield _BranchPath(
                     path=path,
                     parent=parentBranch,
                     fileInfo=fileInfo,
                     unionPath=self,
+                    mountSource=parentBranch.mountSource,
                 )
 
     @cached_property
@@ -278,8 +282,8 @@ class _ChildUnionPath(_UnionPath):
 class _RootUnionPath(_UnionPath):
     """Represents the root path in the union filesystem."""
 
-    layer: Final["LinkResolutionLayer"]
-    """The LinkResolutionLayer this path belongs to."""
+    layer: Final["LinkResolutionUnionMountSource"]
+    """The LinkResolutionUnionMountSource this path belongs to."""
 
     @cached_property
     def root(self) -> "_RootUnionPath":
@@ -297,17 +301,27 @@ class _RootUnionPath(_UnionPath):
         """The absolute path of this union path."""
         return "/"
 
+    def generate_branches(self):
+        """
+        Generate branches from all mount sources.
+        Iterates in reverse order so that rightmost mount sources have highest precedence,
+        consistent with UnionMountSource behavior.
+        """
+        for mountSource in reversed(self.layer.mountSources):
+            fileInfo = mountSource.lookup("/", fileVersion=self.version)
+            if fileInfo is not None:
+                yield _BranchPath(
+                    path="/",
+                    fileInfo=fileInfo,
+                    parent=None,
+                    unionPath=self,
+                    mountSource=mountSource,
+                )
+
     @cached_property
     def branches(self) -> Iterable[_BranchPath]:
         """The file versions that constitute this union path."""
-        return (
-            _BranchPath(
-                path="/",
-                fileInfo=self.layer.mountSource.lookup("/", fileVersion=self.version),
-                parent=None,
-                unionPath=self,
-            ),
-        )
+        return tuple(self.generate_branches())
 
     def _lookup_absolute_path(self, path: str) -> _UnionPath:
         """
@@ -324,18 +338,20 @@ class _RootUnionPath(_UnionPath):
 
 
 @dataclass
-class LinkResolutionLayer(MountSource):
+class LinkResolutionUnionMountSource(MountSource):
     """
-    A MountSource layer that resolves symbolic links in an branch MountSource.
+    A MountSource layer that resolves symbolic links across multiple mount sources.
 
-    This class wraps another MountSource and provides a view where symbolic links and hard links
-    are resolved. It can be configured with a `shouldResolveLink` function to
-    control which links are treated as transparent links and which are kept as
-    symbolic link entries or hard link entries.
+    This class wraps multiple MountSources and provides a unified view where symbolic links
+    and hard links are resolved. It combines the functionality of UnionMountSource with
+    link resolution capabilities. The rightmost mount sources have the highest precedence.
+
+    It can be configured with a `shouldResolveLink` function to control which links are
+    treated as transparent links and which are kept as symbolic link entries or hard link entries.
     """
 
-    mountSource: Final[MountSource]
-    """The branch MountSource to resolve links in."""
+    mountSources: Final[Sequence[MountSource]]
+    """The mount sources to resolve links in. Rightmost sources have highest precedence."""
     shouldResolveLink: Final[Callable[[str, int], bool]]
     """A function that determines whether a given link should be resolved.
 
@@ -348,124 +364,117 @@ class LinkResolutionLayer(MountSource):
     def versions(self, path: str) -> int:
         """
         Returns the number of available versions for a given path, after link resolution.
+        Counts all resolved branches across all mount sources.
         """
-        return sum(
-            len(
-                _RootUnionPath(layer=self, underlyingVersion=underlyingVersion)
-                ._lookup_absolute_path(path)
-                .resolved_branches
-            )
-            for underlyingVersion in range(self.mountSource.versions("/"))# FIXME: 此处逻辑不对
-        )
+        unionPath = _RootUnionPath(
+            layer=self, underlyingVersion=0
+        )._lookup_absolute_path(path)
+        return len(unionPath.resolved_branches)
 
     @overrides(MountSource)
     def lookup(self, path: str, fileVersion: int = 0) -> Optional[FileInfo]:
         """
         Looks up file information for a given path and version, after link resolution.
+        Searches across all mount sources, with rightmost sources having highest precedence.
         """
-        if fileVersion >= 0:
-            try:
-                (resolvedBranch,) = itertools.islice(
-                    (
-                        resolvedBranch
-                        for underlyingVersion in range(self.mountSource.versions("/"))# FIXME: 此处逻辑不对
-                        for resolvedBranch in _RootUnionPath(
-                            layer=self, underlyingVersion=underlyingVersion
-                        )
-                        ._lookup_absolute_path(path)
-                        .resolved_branches
-                    ),
-                    fileVersion,
-                    fileVersion + 1,
-                )
-            except ValueError:
-                return None
-            else:
-                return resolvedBranch.fileInfo
-        else:
-            try:
-                (resolvedBranch,) = itertools.islice(
-                    (
-                        resolvedBranch
-                        for underlyingVersion in range(
-                            -1, -1 - self.mountSource.versions("/")# FIXME: 此处逻辑不对
-                        )
-                        for resolvedBranch in reversed(
-                            _RootUnionPath(
-                                layer=self, underlyingVersion=underlyingVersion
-                            )
-                            ._lookup_absolute_path(path)
-                            .resolved_branches
-                        )
-                    ),
-                    -fileVersion - 1,
-                    -fileVersion,
-                )
-            except ValueError:
-                return None
-            else:
-                return resolvedBranch.fileInfo
-
-    def _list(self, path: str) -> Optional[Iterable[str]]:
         unionPath = _RootUnionPath(
             layer=self, underlyingVersion=0
         )._lookup_absolute_path(path)
-        if unionPath.resolved_folder_branches:
-            return {
-                childName
-                for versionedPath in unionPath.resolved_folder_branches
-                for childName in versionedPath.list_child_names()
-            }
-        return None
+        resolvedBranches = unionPath.resolved_branches
+
+        if not resolvedBranches:
+            return None
+
+        # Handle negative version numbers (from the end)
+        if fileVersion < 0:
+            fileVersion = len(resolvedBranches) + fileVersion
+            if fileVersion < 0:
+                return None
+
+        if fileVersion >= len(resolvedBranches):
+            return None
+
+        branch = resolvedBranches[fileVersion]
+        # Store the mount source in userdata for later use (open, read, etc.)
+        fileInfo = branch.fileInfo
+        fileInfo.userdata.append(branch.mountSource)
+        return fileInfo
 
     @overrides(MountSource)
-    def list(self, path: str) -> Optional[Union[Iterable[str], Dict[str, FileInfo]]]:
+    def list(self, path: str) -> Optional[Union[Iterable[str], dict[str, FileInfo]]]:
         """
         Lists the contents of a directory, after link resolution.
         """
-        return self._list(path)
 
-    @overrides(MountSource)
-    def list_mode(self, path: str) -> Optional[Union[Iterable[str], Dict[str, int]]]:
-        """
-        Lists the contents of a directory with file modes, after link resolution.
-        """
-        return self._list(path)
+        unionPath = _RootUnionPath(
+            layer=self, underlyingVersion=0
+        )._lookup_absolute_path(path)
+        if not unionPath.resolved_folder_branches:
+            return None
+
+        # Collect all child names from all resolved folder branches
+        childNames: set[str] = {
+            name
+            for branch in unionPath.resolved_folder_branches
+            for name in (branch.list_child_names() or ())
+        }
+
+        return childNames
 
     @overrides(MountSource)
     def open(self, fileInfo: FileInfo, buffering=-1) -> IO[bytes]:
         """
         Opens a file for reading, after link resolution.
         """
-        return self.mountSource.open(fileInfo, buffering)
+        mountSource = fileInfo.userdata.pop()
+        try:
+            assert isinstance(mountSource, MountSource)
+            return mountSource.open(fileInfo, buffering=buffering)
+        finally:
+            fileInfo.userdata.append(mountSource)
 
     @overrides(MountSource)
     def read(self, fileInfo: FileInfo, size: int, offset: int) -> bytes:
         """
         Reads data from a file, after link resolution.
         """
-        return self.mountSource.read(fileInfo, size, offset)
+        mountSource = fileInfo.userdata.pop()
+        try:
+            assert isinstance(mountSource, MountSource)
+            return mountSource.read(fileInfo, size, offset)
+        finally:
+            fileInfo.userdata.append(mountSource)
 
     @overrides(MountSource)
-    def list_xattr(self, fileInfo: FileInfo) -> List[str]:
+    def list_xattr(self, fileInfo: FileInfo) -> list[str]:
         """
         Lists extended attributes of a file, after link resolution.
         """
-        return self.mountSource.list_xattr(fileInfo)
+        mountSource = fileInfo.userdata.pop()
+        try:
+            assert isinstance(mountSource, MountSource)
+            return mountSource.list_xattr(fileInfo)
+        finally:
+            fileInfo.userdata.append(mountSource)
 
     @overrides(MountSource)
     def get_xattr(self, fileInfo: FileInfo, key: str) -> Optional[bytes]:
         """
         Gets an extended attribute of a file, after link resolution.
         """
-        return self.mountSource.get_xattr(fileInfo, key)
+        mountSource = fileInfo.userdata.pop()
+        try:
+            assert isinstance(mountSource, MountSource)
+            return mountSource.get_xattr(fileInfo, key)
+        finally:
+            fileInfo.userdata.append(mountSource)
 
     @overrides(MountSource)
     def is_immutable(self) -> bool:
         """
-        Returns whether the underlying mount source is immutable.
+        Returns whether all underlying mount sources are immutable.
         """
-        return self.mountSource.is_immutable()
+        return all(m.is_immutable() for m in self.mountSources)
 
     @overrides(MountSource)
     def exists(self, path: str) -> bool:
@@ -488,34 +497,41 @@ class LinkResolutionLayer(MountSource):
         return bool(unionPath.resolved_folder_branches)
 
     @overrides(MountSource)
-    def get_mount_source(self, fileInfo: FileInfo) -> Tuple[str, MountSource, FileInfo]:
+    def get_mount_source(self, fileInfo: FileInfo) -> tuple[str, MountSource, FileInfo]:
         """
         Gets the mount source for a file, after link resolution.
         """
-        return self.mountSource.get_mount_source(fileInfo)
+        sourceFileInfo = fileInfo.clone()
+        mountSource = sourceFileInfo.userdata.pop()
+
+        if not isinstance(mountSource, MountSource):
+            return "/", self, fileInfo
+
+        # Recursively get the actual mount source
+        return mountSource.get_mount_source(sourceFileInfo)
 
     @overrides(MountSource)
-    def statfs(self) -> Dict[str, Any]:
+    def statfs(self) -> dict[str, Any]:
         """
-        Returns filesystem statistics.
+        Returns filesystem statistics merged from all mount sources.
         """
-        return self.mountSource.statfs()
+        from ratarmountcore.mountsource import merge_statfs
+
+        return merge_statfs([mountSource.statfs() for mountSource in self.mountSources])
 
     @overrides(MountSource)
     def __exit__(self, exception_type, exception_value, exception_traceback):
         """
-        Cleanup method for the mount source.
+        Cleanup method for all mount sources.
         """
-        return super().__exit__(
-            exception_type, exception_value, exception_traceback
-        ) or self.mountSource.__exit__(
-            exception_type, exception_value, exception_traceback
-        )
+        for mountSource in self.mountSources:
+            mountSource.__exit__(exception_type, exception_value, exception_traceback)
 
     @overrides(MountSource)
     def __enter__(self) -> Self:
         """
-        Context manager entry point for the mount source.
+        Context manager entry point for all mount sources.
         """
-        self.mountSource.__enter__()
+        for mountSource in self.mountSources:
+            mountSource.__enter__()
         return super().__enter__()
