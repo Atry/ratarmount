@@ -200,6 +200,7 @@
                 pkgs.shellcheck
                 pkgs.uv
                 pkgs.pixz
+                pkgs._7zz
               ];
 
               env = {
