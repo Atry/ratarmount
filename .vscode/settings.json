@@ -8,5 +8,8 @@
   "python.analysis.extraPaths": [
     "./core"
   ],
-  "python.languageServer": "Jedi"
+  "python.languageServer": "Jedi",
+  "mypy-type-checker.args": [
+    "--config-file=tests/.mypy.ini"
+  ]
 }
